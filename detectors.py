@@ -13,18 +13,6 @@ eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml
 curr_face = [0,0,0,0]
 curr_eyes = [0,0,0,0]
 
-# Set up the SimpleBlobDetector with default parameters.
-params = cv2.SimpleBlobDetector_Params()
-# params.filterByArea = True
-# params.minArea = 100  # min size for pupil area
-# params.maxArea = 1000  # max size for pupil area
-# params.filterByCircularity = True
-# params.minCircularity = 0.2
-# params.filterByConvexity = True
-# params.minConvexity = 0.87
-# params.filterByInertia = True
-# params.minInertiaRatio = 0.2
-detector = cv2.SimpleBlobDetector_create(params)
 
 # frame capture
 caps = []
@@ -67,9 +55,22 @@ def detect_features(frame, roi):
 def resize_img(img, scale_factor = 1):
     if img is None:
         return
-    width = int(2080)
-    height = int(2080)
-    return cv2.resize(img, (width, height), interpolation=cv2.INTER_AREA)   
+    return cv2.resize(img, (img.shape[1] * scale_factor, img.shape[0] * scale_factor), interpolation=cv2.INTER_AREA)   
+
+def bin_threshold_detect(img, threshold=60):
+    if img is None or img.size == 0:
+        return
+
+    # Convert the image to grayscale
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # gray_img[gray_img > 140] = 60
+    blurred_img = cv2.GaussianBlur(gray_img, (5,5), 0)
+    equalized_img = cv2.equalizeHist(blurred_img)
+
+    # Apply adaptive thresholding
+    thresholded_image = cv2.adaptiveThreshold(equalized_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    cv2.imshow("Threshold", resize_img(thresholded_image))
+
 
 def threshold_detect(img, threshold=60, prev_area=0, capture=False):
     if img is None or img.size == 0:
@@ -77,10 +78,10 @@ def threshold_detect(img, threshold=60, prev_area=0, capture=False):
 
     # Convert the image to grayscale
     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray_img[gray_img > 140] = 60
+    gray_img[gray_img > 120] = 60
     cv2.imshow("Threshold", resize_img(gray_img))
     blurred_img = cv2.GaussianBlur(gray_img, (11,11), 0)
-    # equalized_img = cv2.equalizeHist(blurred_img)
+    equalized_img = cv2.equalizeHist(blurred_img)
     # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     # clahe_img = clahe.apply(blurred_img)
 
@@ -213,25 +214,25 @@ def color_detect(image):
 
 
 
-def circle_detect(image):
+def circle_detect(label="", image=None):
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+    gray_image = unsharp_mask(gray_image, sigma=2.0, strength=10)
 
     # Gaussian blur parameters
     gaussian_blur_kernel_size = (5, 5)
     gaussian_blur_sigma_x = 1
 
-        # Canny edge detection parameters
+    # Canny edge detection parameters
     canny_threshold1 = 50
-    canny_threshold2 = 150  # Try values like 100, 150, 200, etc.
+    canny_threshold2 = 200  # Try values like 100, 150, 200, etc.
 
     # Hough Circle Transform parameters
     hough_dp = 1  # Increase if too many false circles are detected
     hough_minDist = 20  # Decrease if too many circles are close together
     hough_param1 = 50  # Increase if too many edges are detected
-    hough_param2 = 20  # Increase to reduce false positives
+    hough_param2 = 1  # Increase to reduce false positives
     hough_minRadius = 20  # Adjust based on the minimum expected size of the pupil
-    hough_maxRadius = 50  # Adjust based on the maximum expected size of the pupil
+    hough_maxRadius = 1000  # Adjust based on the maximum expected size of the pupil
 
     
     # Apply Gaussian blur to reduce noise
@@ -253,10 +254,10 @@ def circle_detect(image):
 
         circles = np.round(circles[0, :]).astype("int")
         for (x, y, r) in circles:
-            cv2.circle(image, (x, y), r, (0, 255, 0), 4)
+            cv2.circle(image, (x, y), r, (0, 255, 0), 1)
 
     # Display the result
-    cv2.imshow('Detected Pupil', image)
+    cv2.imshow(label+'_Detected Pupil', image)
 
 def rgb_diff_detect(image):
 
@@ -313,60 +314,7 @@ def rgb_sum_detect(image):
     cv2.imshow('Filtered Image', filtered_image_bgr)
 
 
-def blob_detect(image):
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    image[image > 140] = 60
-    cv2.imshow("Threshold", resize_img(image))
-    # image = cv2.GaussianBlur(image, (11,11), 0)
-
-    block_size = 13  
-    constant_C = 2  
-
-    image = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, constant_C)
-
-    # Set up the detector with default parameters.
-    params = cv2.SimpleBlobDetector_Params()
-    # Change thresholds
-    params.minThreshold = 0
-    params.maxThreshold = 255
-    # Filter by Area.
-    params.filterByArea = True
-    params.minArea = 100  # Adjust this accordingly to the size of the pupil
-    # Filter by Circularity
-    params.filterByCircularity = False
-    params.minCircularity = 0.4
-    # Filter by Convexity
-    params.filterByConvexity = False
-    params.minConvexity = 0.7
-    # Filter by Inertia
-    params.filterByInertia = False
-    params.minInertiaRatio = 0.1
-
-    # Create a detector with the parameters
-    detector = cv2.SimpleBlobDetector_create(params)
-
-    # Detect blobs
-    keypoints = detector.detect(image)
-
-    # circle keypoints 
-    for keypoint in keypoints:
-        x = int(keypoint.pt[0])
-        y = int(keypoint.pt[1])
-        s = int(keypoint.size)
-        cv2.circle(image, (x, y), s, (0, 0, 255), 2)
-
-    print(f"Number of keypoints: {len(keypoints)}")
-
-    # Draw detected blobs as red circles.
-    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
-    if len(keypoints) > 0:
-        blank = np.zeros((1, 1))
-        cv2.drawKeypoints(image, keypoints, blank, (0, 0, 255),
-                            cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-    # Show keypoints
-    cv2.imshow("Keypoints", image)
 
 
 def pupil_detect(img):
@@ -438,7 +386,7 @@ def preprocessed_detect(image):
 
 
 
-def get_circle_values(image, center, radius):
+def get_circle_values_old(image, center, radius):
     mask = np.zeros(image.shape[:2], dtype="uint8")
     cv2.circle(mask, center, radius, 255, -1)
     return image[mask == 255]
@@ -447,7 +395,7 @@ def find_pupil_radius(image, center, initial_radius, threshold):
     # convert to grayscale 
     gray_image = image #cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     debug_image = gray_image.copy()
-    mean_val_prev = np.mean(get_circle_values(gray_image, center, initial_radius))
+    mean_val_prev = np.mean(get_circle_get_circle_values_oldvalues(gray_image, center, initial_radius))
     for r in range(initial_radius, gray_image.shape[0]//2, 10):
         # Create a copy of the image for debug drawing
         # Draw the debug circle on the copy
@@ -455,14 +403,14 @@ def find_pupil_radius(image, center, initial_radius, threshold):
         # Display the debug image
         # cv2.waitKey(0)
 
-        mean_val_current = np.mean(get_circle_values(gray_image, center, r))
+        mean_val_current = np.mean(get_circle_values_old(gray_image, center, r))
         print(mean_val_current - mean_val_prev)
         if abs(mean_val_current - mean_val_prev) > threshold:
             return r
         # mean_val_prev = mean_val_current
         
     return None
-
+ 
 def print_hue(image):
     # Convert the image to HSV
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -484,10 +432,10 @@ def print_hue(image):
     value_colormap_bgr = cv2.cvtColor((value_colormap[:, :, :3] * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
     # Save the color maps as images
-    cv2.imwrite('hue_colormap.png', hue_colormap_bgr)
-    cv2.imwrite('saturation_colormap.png', saturation_colormap_bgr)
-    cv2.imwrite('value_colormap.png', value_colormap_bgr)
-    cv2.imwrite('gray_image.png', gray_image)
+    cv2.imwrite('output/hue_colormap.png', hue_colormap_bgr)
+    cv2.imwrite('output/saturation_colormap.png', saturation_colormap_bgr)
+    cv2.imwrite('output/value_colormap.png', value_colormap_bgr)
+    cv2.imwrite('output/gray_image.png', gray_image)
 
     # Provide the paths for download
     hue_colormap_path = 'hue_colormap.png'
@@ -499,4 +447,230 @@ def print_hue(image):
 
 
 
+def get_circle_values(image, center, radius, num_sections):
+    mask = np.zeros(image.shape[:2], dtype="uint8")
+    cv2.circle(mask, center, radius, 255, -1)
     
+    # Convert the center and radius to integer values
+    center = tuple(map(int, center))
+    radius = int(radius)
+    
+    # Create an array to store the mean values of each section
+    means = np.zeros(num_sections)
+    
+    # Angle step for each section
+    angle_step = 360 / num_sections
+    
+    for i in range(num_sections):
+        # Create a mask for the current section
+        section_mask = np.zeros(image.shape[:2], dtype="uint8")
+        
+        # Define the start and end angles for the current section
+        start_angle = int(angle_step * i)
+        end_angle = int(angle_step * (i + 1))
+        
+        # Draw the section on the mask
+        cv2.ellipse(section_mask, center, (radius, radius), 0, start_angle, end_angle, 255, -1)
+        
+        # Combine the section mask with the original circle mask
+        combined_mask = cv2.bitwise_and(mask, section_mask)
+        
+        # Extract the pixel values from the image using the combined mask
+        section_pixels = image[combined_mask == 255]
+        
+        # Calculate the mean value of the pixels in the section
+        if section_pixels.size > 0:
+            means[i] = np.mean(section_pixels)
+        else:
+            means[i] = 0  # If there are no pixels in the section, set the mean to 0
+    
+    return means
+
+def find_pupil_radius_out(image, center, threshold = 2, precision=10, step = 5, delta_acceptance=0.7, max_brightness=140):
+    # convert to grayscale 
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray_image[gray_image > max_brightness] = 60
+    # filter
+    gray_image = unsharp_mask(gray_image, sigma=2.0, strength=10)
+    # gray_image = cv2.GaussianBlur(gray_image, (0,0), 5)
+
+    initial_radius = image.shape[0]//2 
+    debug_image = gray_image.copy()
+    prev_segments = get_circle_values(gray_image, center, initial_radius, precision)
+    mean_val_init = np.mean(prev_segments)
+    print(f"mean_val_init: {mean_val_init}")
+    diff_segment_goal = int(precision * delta_acceptance)
+
+    attempt = 1
+    for r in range(initial_radius-step, 0, -step):
+        print(f"Attempt {attempt}:")
+        # Draw the debug circle on the copy
+        cv2.circle(debug_image, center, r, (0, 0, 255), 1) 
+        cv2.imshow("Debug", debug_image)
+        cv2.moveWindow("Debug", 0, 850)
+        # cv2.waitKey(0)
+
+        current_segments = get_circle_values(gray_image, center, r, precision)
+        # print(f"prev_segments: {prev_segments}")
+        # print(f"Current segments: {current_segments}")
+        # print(f"DIFF: {prev_segments - current_segments}")
+        # print(f"RATIO: {prev_segments / current_segments}")
+        
+        
+
+        diff_sections = 0
+        for i in range(len(prev_segments)):
+            if (prev_segments[i] - current_segments[i]) > threshold: 
+            # if (prev_segments[i] / current_segments[i]) > 1.05: 
+                diff_sections += 1
+
+        print(f"Acceptance: {diff_sections / precision}")
+
+        # print(f"diff_sections: {diff_sections}")
+        if (diff_sections >= diff_segment_goal):
+            print(f"Found pupil radius: {r}")
+            return r
+
+        prev_segments = current_segments
+        attempt += 1
+        
+    return None
+
+
+def unsharp_mask(image, sigma=1.0, strength=1.5):
+    # Blurring the image
+    blurred = cv2.GaussianBlur(image, (0, 0), sigma)
+    
+    # Calculating the unsharp mask
+    unsharp_mask = cv2.addWeighted(image, 1.0 + strength, blurred, -strength, 0)
+    
+    return unsharp_mask
+
+def binary_threshold_detect(label, image, max_brightness=180):
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    center_val = np.mean(gray_image[gray_image.shape[0]//2-3:gray_image.shape[0]//2+3, gray_image.shape[1]//2-5:gray_image.shape[1]//2+5])
+    # get darkest value in image
+    max_brightness = np.max(gray_image)
+    min_brightness = np.min(gray_image)
+
+    for i in range(10):
+        bright_pixels_mask = gray_image >= max_brightness - 10
+        gray_image[bright_pixels_mask] = min_brightness+10
+        max_brightness = np.max(gray_image)
+
+    # gray_image = apply_reverse_vignette(gray_image)
+
+    # morph close image
+    kernel = np.ones((5,5),np.uint8)
+    gray_image = cv2.morphologyEx(gray_image, cv2.MORPH_CLOSE, kernel)
+
+   # blur image
+    # gray_image = cv2.GaussianBlur(gray_image, (5,5), 0)
+    cv2.imshow(label+"_Gray", gray_image)
+    cv2.moveWindow(label+"_Gray", 0, 600)
+
+    # thresholded_im = cv2.adaptiveThreshold(gray_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 75, 0)
+    # get mean brightness of center 10X10 pixels 
+    center_val = np.mean(gray_image[gray_image.shape[0]//2-10:gray_image.shape[0]//2+10, gray_image.shape[1]//2-5:gray_image.shape[1]//2+5])
+    print(f"Center brightness: {center_val}")
+    print(f"Min brightness: {min_brightness}")
+    thresholded_im = cv2.threshold(gray_image, min_brightness+10, 255, cv2.THRESH_BINARY)[1]
+
+    kernel = np.ones((5,5),np.uint8)
+    # thresholded_im = cv2.morphologyEx(thresholded_im, cv2.MORPH_CLOSE, kernel)
+
+    cv2.imshow(label+"_Thresholded", thresholded_im)
+    cv2.moveWindow(label+"_Thresholded", 0, 800)
+
+    # detect blobs
+    # blob_detect(label, image, thresholded_im)
+    contour_detection(label, image, thresholded_im)
+
+
+def blob_detect(label, image, processed_img):
+
+    # Set up the detector with default parameters.
+    params = cv2.SimpleBlobDetector_Params()
+    params.filterByArea = False
+    params.minArea = 100  # min size for pupil area
+    params.maxArea = 1000  # max size for pupil area
+    params.filterByCircularity = False
+    params.minCircularity = 0.2
+    params.filterByConvexity = False
+    params.minConvexity = 0.1
+    params.filterByInertia = False
+    params.minInertiaRatio = 0.2
+    params.blobColor = 0
+
+    # Create a detector with the parameters
+    detector = cv2.SimpleBlobDetector_create(params)
+
+    # Detect blobs
+    keypoints = detector.detect(processed_img)
+
+    # circle keypoints 
+    for keypoint in keypoints:
+        x = int(keypoint.pt[0])
+        y = int(keypoint.pt[1])
+        s = int(keypoint.size)
+        cv2.circle(processed_img, (x, y), s, (0, 0, 255), 1)
+
+    print(f"Label: {label}")
+    print(f"Number of keypoints: {len(keypoints)}")
+
+    # Draw detected blobs as red circles.
+    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
+    if len(keypoints) > 0:
+        blank = np.zeros((1, 1))
+        cv2.drawKeypoints(processed_img, keypoints, blank, (0, 0, 255),
+                            cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    # Show keypoints
+    cv2.imshow(label+"_Keypoints", processed_img)
+
+
+def apply_reverse_vignette(image, darken_factor=1.2):
+    # Create a coordinate grid
+    rows, cols = image.shape[:2]
+    x = np.linspace(-1, 1, cols)
+    y = np.linspace(-1, 1, rows)
+    x, y = np.meshgrid(x, y)
+
+    # Compute the radial distance from the center normalized to [0, 1]
+    r = np.sqrt(x**2 + y**2)
+    r = r / np.max(r)
+
+    # Create the reverse vignette mask
+    reverse_vignette_mask = r**darken_factor  # Darken towards the center
+
+    # Apply the reverse vignette mask to each channel of the image
+    if len(image.shape) == 3:  # For colored images
+        reverse_vignette_mask = np.stack([reverse_vignette_mask] * 3, axis=-1)
+    
+    return np.uint8(image * reverse_vignette_mask)
+
+
+def contour_detection(label, image, processed_img):
+    # Assuming processed_img is a binary image with a black blob on a white background
+    # You may need to threshold or invert the image accordingly
+    ret, thresh = cv2.threshold(processed_img, 127, 255, cv2.THRESH_BINARY_INV)
+
+    # Find contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) == 0:
+        return
+
+    # Find the largest contour which will presumably be the pupil
+    largest_contour = max(contours, key=cv2.contourArea)
+
+    # Assuming we're looking for a circular blob, calculate its center and radius
+    (x, y), radius = cv2.minEnclosingCircle(largest_contour)
+    center = (int(x), int(y))
+    radius = int(radius)
+    print(f" Radius: {radius}")
+
+    # Draw the circle on the original image
+    # output_img = cv2.cvtColor(processed_img, cv2.COLOR_GRAY2BGR)
+    cv2.circle(image, center, radius, (0, 255, 0), 2)
+
+    cv2.imshow(label+"_Detected Pupil", image)
